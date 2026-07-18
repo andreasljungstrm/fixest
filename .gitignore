@@ -24,3 +24,4 @@ _quarto/*
 # Configure script outputs
 config.log
 src/Makevars
+_BENCHMARK/sweep.log
