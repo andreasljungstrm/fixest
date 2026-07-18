@@ -1,6 +1,10 @@
 
 # fixest 0.14.2
 
+## New features
+
+- new argument `tilt` in `feglm`, `feglm.fit` and `fepois`: computes each IRLS iteration from exponentially tilted within-cell moments of the individual-level covariates instead of the full-design weighted cross-product. The decomposition is exact for all families (canonical links or not), so the results are identical to the default algorithm, while the per-iteration cost drops from `O(N (p+k)^2)` to `O(N p^2) + O(J k^2)` when the design contains `k` dummy columns forming `J` cells and only `p` continuous-involving columns. See `tests/test_tilt.R` for validation and benchmarks.
+
 ## Bug fixes
 
 - fix bug in vcov(): following v0.14.0, the returned object was a matrix of class `fixest_vcov` -- which led to problem for matrix operations as it didn't inherit the matrix class. Now fixed, thanks to @strengejacke, #652.

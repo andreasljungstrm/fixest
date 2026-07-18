@@ -989,12 +989,16 @@ void to_index_main(const std::vector<IndexInputVector> &all_vecs, IndexedVector 
     const IndexInputVector *x = &all_vecs[k];
     if(x->is_fast_int){
       int new_bin_range = sum_bin_ranges + x->x_range_bin;
-      if(new_bin_range < 17 || (K >= 2 && new_bin_range <= power_of_two(5 * n))){
+      // the lookup table of multiple_ints_to_index is of size
+      // 2^(sum_bin_ranges + K' - 1), K' the number of fast-int vectors:
+      // the packing bits must be counted to keep the allocation bounded
+      int new_alloc_bin = new_bin_range + (int) id_fast_int.size();
+      if(new_alloc_bin < 17 || (K >= 2 && new_alloc_bin <= power_of_two(5 * n))){
         id_fast_int.push_back(k);
         sum_bin_ranges = new_bin_range;
       } else {
         break;
-      }      
+      }
     }
   }
   

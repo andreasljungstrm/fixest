@@ -81,7 +81,7 @@ fixest_env = function(fml, data, family = c("poisson", "negbin", "logit", "gauss
   femlm_args = c("family", "theta.init", "linear.start", "opt.control", "deriv.tol", "deriv.iter")
   feNmlm_args = c("NL.fml", "NL.start", "lower", "upper", "NL.start.init", 
                   "jacobian.method", "useHessian", "hessian.args")
-  feglm_args = c("family", "weights", "glm.iter", "glm.tol", "etastart", "mustart", 
+  feglm_args = c("family", "weights", "glm.iter", "glm.tol", "tilt", "etastart", "mustart",
                  "collin.tol", "fixef.algo")
   feols_args = c("weights", "demeaned", "collin.tol", "fixef.algo")
   internal_args = c("debug")

@@ -2425,6 +2425,22 @@ feols.fit = function(y, X, fixef_df, vcov, offset, split, fsplit, split.keep, sp
 #' two coefficients of successive iterations.
 #' @param glm.iter Number of iterations of the glm algorithm. Default is 25.
 #' @param glm.tol Tolerance level for the glm algorithm. Default is `1e-8`.
+#' @param tilt Logical, default is `FALSE`. If `TRUE`, the weighted least-squares
+#' step of each IRLS iteration is computed from exponentially tilted within-cell
+#' moments instead of the full-design cross-product. The cells are the
+#' cross-classification of the dummy (0/1) columns of the design matrix (intercept,
+#' factor dummies and their interactions); the tilt is the IRLS weight of the
+#' family (for Poisson, the Esscher transform of the within-cell exposure measure).
+#' The decomposition is exact, so the iterates -- and hence coefficients, standard
+#' errors and likelihood -- are identical to the default algorithm up to
+#' floating-point summation order, while each iteration costs
+#' `O(N * p^2) + O(J * k^2)` instead of `O(N * (p+k)^2)`, with `p` the number of
+#' continuous-involving columns, `k` the number of dummy columns and `J` the number
+#' of cells. The gain is large when the model contains rich categorical structure
+#' (`k` large, `J << N`). Works for all families, canonical links or not. Not
+#' compatible with fixed-effects absorption (include the factors in the linear
+#' part of the formula instead); silently falls back to the default algorithm
+#' when no cell structure is found.
 #' @param verbose Integer. Higher values give more information. In particular, 
 #' it can detail the number of iterations in the demeaning algoritmh (the first number 
 #' is the left-hand-side, the other numbers are the right-hand-side variables). 
@@ -2575,9 +2591,10 @@ feglm = function(fml, data, family = "gaussian", vcov, offset, weights, subset, 
                  panel.time.step = NULL, panel.duplicate.method = "none",
                  start = NULL,
                  etastart = NULL, mustart = NULL, fixef, fixef.rm = "perfect_fit",
-                 fixef.tol = 1e-6, fixef.iter = 10000, fixef.algo = NULL, 
+                 fixef.tol = 1e-6, fixef.iter = 10000, fixef.algo = NULL,
                  collin.tol = 1e-9,
-                 glm.iter = 25, glm.tol = 1e-8, nthreads = getFixest_nthreads(),
+                 glm.iter = 25, glm.tol = 1e-8, tilt = FALSE,
+                 nthreads = getFixest_nthreads(),
                  lean = FALSE, warn = TRUE, notes = getFixest_notes(), verbose = 0,
                  only.coef = FALSE, data.save = FALSE,
                  fixef.keep_names = NULL, mem.clean = FALSE, only.env = FALSE, env, ...){
@@ -2621,6 +2638,12 @@ feglm = function(fml, data, family = "gaussian", vcov, offset, weights, subset, 
     stopi("{err_msg}")
   }
 
+  check_arg(tilt, "logical scalar")
+  if(tilt && get("isFixef", env)){
+    stop("The exponential-tilt algorithm (tilt = TRUE) is not compatible with fixed-effects absorption. Include the fixed-effects as factors in the linear part of the formula instead.")
+  }
+  assign("do_tilt", tilt, env)
+
   check_arg(only.env, "logical scalar")
   if(only.env){
     return(env)
@@ -2642,9 +2665,10 @@ feglm.fit = function(y, X, fixef_df, family = "gaussian", vcov, offset, split,
                      fsplit, split.keep, split.drop, cluster, se, ssc, 
                      weights, subset, start = NULL,
                      etastart = NULL, mustart = NULL, fixef.rm = "perfect_fit",
-                     fixef.tol = 1e-6, fixef.iter = 10000, fixef.algo = NULL, 
+                     fixef.tol = 1e-6, fixef.iter = 10000, fixef.algo = NULL,
                      collin.tol = 1e-9,
-                     glm.iter = 25, glm.tol = 1e-8, nthreads = getFixest_nthreads(),
+                     glm.iter = 25, glm.tol = 1e-8, tilt = FALSE,
+                     nthreads = getFixest_nthreads(),
                      lean = FALSE, warn = TRUE, notes = getFixest_notes(), mem.clean = FALSE,
                      verbose = 0, only.env = FALSE, only.coef = FALSE, env, ...){
 
@@ -2681,6 +2705,7 @@ feglm.fit = function(y, X, fixef_df, family = "gaussian", vcov, offset, split,
     if(missing(warn)) warn = get("warn", env)
     if(missing(verbose)) verbose = get("verbose", env)
     if(missing(only.coef)) only.coef = get("only.coef", env)
+    if(missing(tilt)) tilt = isTRUE(get0("do_tilt", envir = env, ifnotfound = FALSE))
 
     # starting point of the fixed-effects
     if(!is.null(dots$means)) means = dots$means
@@ -2734,6 +2759,12 @@ feglm.fit = function(y, X, fixef_df, family = "gaussian", vcov, offset, split,
 
     verbose = get("verbose", env)
     if(verbose >= 2) cat("Setup in ", (proc.time() - time_start)[3], "s\n", sep="")
+
+    check_arg(tilt, "logical scalar")
+    if(tilt && get("isFixef", env)){
+      stop("The exponential-tilt algorithm (tilt = TRUE) is not compatible with fixed-effects absorption. Include the fixed-effects as factors in the linear part instead.")
+    }
+    assign("do_tilt", tilt, env)
 
     # y/X
     y = get("lhs", env)
@@ -2985,6 +3016,25 @@ feglm.fit = function(y, X, fixef_df, family = "gaussian", vcov, offset, split,
   }
 
   #
+  # Tilted cell moments setup
+  #
+
+  do_tilt = isTRUE(tilt) && !isFixef && !onlyFixef
+  tilt_struct = NULL
+  if(do_tilt){
+    tilt_struct = tilt_setup(X)
+    if(is.null(tilt_struct)){
+      # no exploitable cell structure: standard algorithm
+      do_tilt = FALSE
+      if(verbose >= 1) cat("Tilt: no cell structure found, using the standard algorithm.\n")
+    } else if(verbose >= 1){
+      cat("Tilt: ", length(tilt_struct$ccols), " cell-level columns over ",
+          formatC(tilt_struct$J, big.mark = ","), " cells, ",
+          length(tilt_struct$icols), " individual-level columns.\n", sep = "")
+    }
+  }
+
+  #
   # The main loop
   #
 
@@ -3035,11 +3085,15 @@ feglm.fit = function(y, X, fixef_df, family = "gaussian", vcov, offset, split,
       gc()
     }
 
-    wols = feols(y = z, X = X, weights = w, means = wols_means,
-                 correct_0w = any_0w, env = env, fixef.tol = fixef.tol * 10**(iter==1),
-                 fixef.iter = fixef.iter, collin.tol = collin.tol, nthreads = nthreads,
-                 mem.clean = mem.clean, warn = warn,
-                 verbose = verbose - 1, fromGLM = TRUE)
+    if(do_tilt){
+      wols = tilt_wls(z, X, w, tilt_struct, collin.tol, nthreads)
+    } else {
+      wols = feols(y = z, X = X, weights = w, means = wols_means,
+                   correct_0w = any_0w, env = env, fixef.tol = fixef.tol * 10**(iter==1),
+                   fixef.iter = fixef.iter, collin.tol = collin.tol, nthreads = nthreads,
+                   mem.clean = mem.clean, warn = warn,
+                   verbose = verbose - 1, fromGLM = TRUE)
+    }
 
     if(isTRUE(wols$NA_model)){
       return(wols)
@@ -3277,13 +3331,24 @@ feglm.fit = function(y, X, fixef_df, family = "gaussian", vcov, offset, split,
       gc()
     }
 
+    # X'WX: reuse the tilted cell-moment cross-product when available
+    # (it was computed at the weights of the last iteration, i.e. irls_weights)
+    if(do_tilt && res$convStatus && !is.null(wols$xwx)){
+      hessian_glm = wols$xwx
+      if(wols$multicol){
+        hessian_glm = hessian_glm[!wols$is_excluded, !wols$is_excluded, drop = FALSE]
+      }
+    } else {
+      hessian_glm = cpp_crossprod(wols$X_demean, res$irls_weights, nthreads)
+    }
+
     # dispersion + scores
     if(family$family %in% c("poisson", "binomial")){
       res$scores = (wols$residuals * res$irls_weights) * wols$X_demean
-      res$hessian = cpp_crossprod(wols$X_demean, res$irls_weights, nthreads)
+      res$hessian = hessian_glm
     } else {
       res$scores = (weighted_resids / res$dispersion) * wols$X_demean
-      res$hessian = cpp_crossprod(wols$X_demean, res$irls_weights, nthreads) / res$dispersion
+      res$hessian = hessian_glm / res$dispersion
     }
 
     if(any(diag(res$hessian) < 0)){
@@ -3711,8 +3776,8 @@ fepois = function(fml, data, vcov, offset, weights, subset, split, fsplit,
                   panel.duplicate.method = "none", start = NULL, etastart = NULL,
                   mustart = NULL, fixef, fixef.rm = "perfect_fit", fixef.tol = 1e-6,
                   fixef.iter = 10000, fixef.algo = NULL,
-                  collin.tol = 1e-9, glm.iter = 25, glm.tol = 1e-8,
-                  nthreads = getFixest_nthreads(), lean = FALSE, 
+                  collin.tol = 1e-9, glm.iter = 25, glm.tol = 1e-8, tilt = FALSE,
+                  nthreads = getFixest_nthreads(), lean = FALSE,
                   warn = TRUE, notes = getFixest_notes(),
                   verbose = 0, fixef.keep_names = NULL, mem.clean = FALSE, only.env = FALSE,
                   only.coef = FALSE, data.save = FALSE, env, ...){
@@ -3736,6 +3801,7 @@ fepois = function(fml, data, vcov, offset, weights, subset, split, fsplit,
                   fixef.rm = fixef.rm, fixef.tol = fixef.tol, fixef.iter = fixef.iter,
                   fixef.algo = fixef.algo,
                   collin.tol = collin.tol, glm.iter = glm.iter, glm.tol = glm.tol,
+                  tilt = tilt,
                   nthreads = nthreads, lean = lean, warn = warn, notes = notes,
                   verbose = verbose, fixef.keep_names = fixef.keep_names, mem.clean = mem.clean,
                   only.env = only.env, only.coef = only.coef, data.save = data.save,

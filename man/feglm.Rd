@@ -35,6 +35,7 @@ feglm(
   collin.tol = 1e-09,
   glm.iter = 25,
   glm.tol = 1e-08,
+  tilt = FALSE,
   nthreads = getFixest_nthreads(),
   lean = FALSE,
   warn = TRUE,
@@ -75,6 +76,7 @@ feglm.fit(
   collin.tol = 1e-09,
   glm.iter = 25,
   glm.tol = 1e-08,
+  tilt = FALSE,
   nthreads = getFixest_nthreads(),
   lean = FALSE,
   warn = TRUE,
@@ -115,6 +117,7 @@ fepois(
   collin.tol = 1e-09,
   glm.iter = 25,
   glm.tol = 1e-08,
+  tilt = FALSE,
   nthreads = getFixest_nthreads(),
   lean = FALSE,
   warn = TRUE,
@@ -319,6 +322,23 @@ collinearity is t-stats that are extremely low (for instance when t-stats < 1e-3
 \item{glm.iter}{Number of iterations of the glm algorithm. Default is 25.}
 
 \item{glm.tol}{Tolerance level for the glm algorithm. Default is \code{1e-8}.}
+
+\item{tilt}{Logical, default is \code{FALSE}. If \code{TRUE}, the weighted least-squares
+step of each IRLS iteration is computed from exponentially tilted within-cell
+moments instead of the full-design cross-product. The cells are the
+cross-classification of the dummy (0/1) columns of the design matrix (intercept,
+factor dummies and their interactions); the tilt is the IRLS weight of the
+family (for Poisson, the Esscher transform of the within-cell exposure measure).
+The decomposition is exact, so the iterates -- and hence coefficients, standard
+errors and likelihood -- are identical to the default algorithm up to
+floating-point summation order, while each iteration costs
+\code{O(N * p^2) + O(J * k^2)} instead of \code{O(N * (p+k)^2)}, with \code{p} the number of
+continuous-involving columns, \code{k} the number of dummy columns and \code{J} the number
+of cells. The gain is large when the model contains rich categorical structure
+(\code{k} large, \code{J << N}). Works for all families, canonical links or not. Not
+compatible with fixed-effects absorption (include the factors in the linear
+part of the formula instead); silently falls back to the default algorithm
+when no cell structure is found.}
 
 \item{nthreads}{The number of threads. Can be: a) an integer lower than, or equal to,
 the maximum number of threads; b) 0: meaning all available threads will be used;
