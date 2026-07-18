@@ -193,3 +193,49 @@ bench_one(y_pois ~ x1*f2 + f1, "poisson", db,
           "Poisson, continuous-factor interaction (k = 120, p = 21)")
 
 cat("All tilt tests passed.\n")
+
+#
+# Part 3 (optional): heavyweight logit stress test ####
+#
+
+# Run with FIXEST_TILT_HEAVY=1. Entity-level binary attributes: N
+# observations belong to E entities and carry k binary attributes constant
+# within entity, with 65% prevalence -- so fixest's dummy-sparsity shortcut
+# does not apply and the original algorithm runs its dense O(N q^2)
+# weighted cross-product at every IRLS iteration (>10 minutes at these
+# sizes), while the tilted algorithm detects the E cells and runs each
+# iteration at O(N p^2) + O(E k^2) (under a minute), with identical output.
+
+if(isTRUE(Sys.getenv("FIXEST_TILT_HEAVY") == "1")){
+
+  cat("\nPART 3: heavyweight logit stress test\n\n")
+
+  set.seed(2026)
+  nh = 1e5; E = 2500; kh = 1700
+  gh = sample.int(E, nh, TRUE)
+  A = matrix(rbinom(E*kh, 1, 0.65), E, kh)
+  Xh = cbind(x1 = rnorm(nh), x2 = rnorm(nh), A[gh, ])
+  colnames(Xh) = c("x1", "x2", paste0("a", 1:kh))
+  beta_h = c(0.4, -0.3, rnorm(kh, 0, 1.2/sqrt(kh)))
+  yh = rbinom(nh, 1, plogis(drop(Xh %*% beta_h) - 1.2))
+  rm(A); invisible(gc())
+
+  cat(sprintf("  N = %s, E = %s cells, k = %d entity-level columns, q = %d\n",
+              formatC(nh, big.mark = ","), formatC(E, big.mark = ","),
+              kh, ncol(Xh) + 1))
+
+  t_o = system.time(orig <- feglm.fit(yh, Xh, family = "logit"))
+  cat(sprintf("  original: %7.1f s  (%d iterations, %.1f s/iter)\n",
+              t_o[3], orig$iterations, t_o[3]/orig$iterations))
+
+  t_t = system.time(tilt <- feglm.fit(yh, Xh, family = "logit", tilt = TRUE))
+  cat(sprintf("  tilt:     %7.1f s  (%d iterations, %.1f s/iter)   speedup x%.1f\n",
+              t_t[3], tilt$iterations, t_t[3]/tilt$iterations, t_o[3]/t_t[3]))
+  cat(sprintf("  max |coef diff| = %.1e, max |se diff| = %.1e\n",
+              max_diff(coef(orig), coef(tilt)), max_diff(se(orig), se(tilt))))
+
+  stopifnot(max_diff(coef(orig), coef(tilt)) < 1e-8,
+            max_diff(se(orig), se(tilt)) < 1e-8,
+            orig$iterations == tilt$iterations)
+  cat("\nHeavy stress test passed: identical fits.\n")
+}
