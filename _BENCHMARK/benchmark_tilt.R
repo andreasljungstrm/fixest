@@ -135,8 +135,8 @@ cat("\nResults written to", out_csv, "\n")
 # Plot: the full picture ####
 #
 
-png(out_png, width = 1500, height = 950, res = 105)
-par(mfrow = c(2, 3), mar = c(4.2, 4.2, 2.5, 1), mgp = c(2.6, 0.8, 0))
+png(out_png, width = 1900, height = 950, res = 105)
+par(mfrow = c(2, 4), mar = c(4.2, 4.2, 2.5, 1), mgp = c(2.6, 0.8, 0))
 
 panel = function(sub, xvar, xlab, log = "xy", xvals = NULL){
   s = res[res$sweep == sub, ]
@@ -157,6 +157,7 @@ panel("k", "k", "k (cell-level columns)")
 panel("p", "p", "p (individual-level columns)", log = "y")
 panel("J", "E", "J (number of cells)")
 panel("prevalence", "prevalence", "attribute prevalence", log = "y")
+panel("dummies", "k", "k (one-hot dummy columns)")
 
 s = res[res$sweep == "family", ]
 bp = barplot(rbind(s$t_orig, s$t_tilt), beside = TRUE, names.arg = s$family,
@@ -165,6 +166,17 @@ bp = barplot(rbind(s$t_orig, s$t_tilt), beside = TRUE, names.arg = s$family,
              args.legend = list(bty = "n"))
 text(colMeans(bp), pmax(s$t_orig, s$t_tilt) * 0.5,
      labels = sprintf("x%.1f", s$speedup), cex = 0.8)
+
+# speedup overview across all attribute-design points
+sa = res[res$design == "attributes", ]
+plot(sa$t_orig, sa$speedup, log = "x", pch = 19, col = "gray40",
+     xlab = "original fit time (s)", ylab = "speedup (x)",
+     main = "speedup vs problem cost")
+abline(h = 1, lty = 2)
+sd2 = res[res$design == "dummies", ]
+points(sd2$t_orig, sd2$speedup, pch = 4, col = "darkorange")
+legend("topleft", c("attributes (dense)", "one-hot dummies (sparse)"),
+       pch = c(19, 4), col = c("gray40", "darkorange"), bty = "n", cex = 0.9)
 
 dev.off()
 cat("Plot written to", out_png, "\n")
